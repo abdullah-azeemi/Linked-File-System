@@ -13,15 +13,18 @@
 #define MAX_FILE_NAME 64
 #define FAT_SIZE (DISK_SIZE / BLOCK_SIZE) // 65536 entries
 #define MAX_FILE_SIZE (128 * BLOCK_SIZE) // 128 blocks = 128 KB
+#define MAX_KEY_SIZE 64
+#define MAX_FILENAME_LENGTH 64
 
-
-// Data structures
-typedef struct {
+struct DirectoryEntry {
     char name[MAX_FILE_NAME];
-    int startBlock;
-    int size;
-    int isDirectory; // 1 for directory, 0 for file
-} DirectoryEntry;
+    int startBlock;    
+    int size;           
+    bool isDirectory;  
+    int parentDirIndex; 
+};
+
+
 
 // Global variables
 extern int FAT[FAT_SIZE];
@@ -34,7 +37,7 @@ void writeBlock(FILE* disk, int blockNum, const void* data);
 void readBlock(FILE* disk, int blockNum, void* buffer);
 
 int createFile(const char* name, int size);
-int deleteFile(const char* name);
+void deleteFile(const char* name);
 void consoleInterface(const char* diskName);
 void exitProgram(FILE* disk);
 void loadFileSystemState(const char* diskName);

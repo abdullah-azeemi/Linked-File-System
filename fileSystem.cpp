@@ -4,12 +4,12 @@
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
+#include<string>
 
 using namespace std;
 
 int FAT[FAT_SIZE];
 DirectoryEntry directory[DIRECTORY_SIZE];
-
 void formatDisk(const char* diskName) {
     FILE* disk = fopen(diskName, "r+b");
     if (!disk) {
@@ -29,8 +29,7 @@ void formatDisk(const char* diskName) {
     fclose(disk);
     cout << "Disk formatted successfully.\n";
 }
-
-void createDirectory(const char* name) {
+void createDirectory(const char* name, int parentDirIndex = -1) {
     int dirIndex = -1;
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
         if (directory[i].startBlock == -1) {
@@ -44,13 +43,17 @@ void createDirectory(const char* name) {
     }
 
     strcpy(directory[dirIndex].name, name);
-    directory[dirIndex].startBlock = -1; // No blocks needed for directory
-    directory[dirIndex].size = 0;
-    directory[dirIndex].isDirectory = 1;
+    directory[dirIndex].startBlock = dirIndex;  
+    directory[dirIndex].size = 0; 
+    directory[dirIndex].isDirectory = true;
+    directory[dirIndex].parentDirIndex = parentDirIndex;
+
+    if (parentDirIndex != -1) {
+        directory[parentDirIndex].size++;
+    }
 
     cout << "Directory '" << name << "' created successfully.\n";
 }
-
 void saveFileSystemState(FILE* disk) {
     writeBlock(disk, 0, FAT);         // Save FAT to block 0
     writeBlock(disk, 1, directory);  // Save Directory to block 1
@@ -60,7 +63,6 @@ void loadFileSystemState(FILE* disk) {
     readBlock(disk, 0, FAT);         // Load FAT from block 0
     readBlock(disk, 1, directory);   // Load Directory from block 1
 }
-
 void deleteDirectory(const char* name) {
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
         if (strcmp(directory[i].name, name) == 0 && directory[i].isDirectory) {
@@ -72,7 +74,6 @@ void deleteDirectory(const char* name) {
     }
     cout << "Error: Directory not found.\n";
 }
-
 int deleteFileOrDirectory(const char* name) {
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
         if (strcmp(directory[i].name, name) == 0) {
@@ -101,7 +102,6 @@ void createPartition(const char* diskName) {
     formatDisk(diskName);
     cout << "Partition '" << diskName << "' created and formatted.\n";
 }
-
 int createFile(const char* name, int size) {
     if (size > MAX_FILE_SIZE) {
         cout << "Error: File size exceeds the maximum limit.\n";
@@ -122,6 +122,9 @@ int createFile(const char* name, int size) {
 
     int blocksRequired = (size + BLOCK_SIZE - 1) / BLOCK_SIZE;
     int prevBlock = -1, startBlock = -1;
+
+    cout << "Blocks required for file: " << blocksRequired << endl;  // Debug print
+
     for (int i = 0; i < FAT_SIZE && blocksRequired > 0; i++) {
         if (FAT[i] == -1) {
             if (startBlock == -1) startBlock = i;
@@ -130,6 +133,7 @@ int createFile(const char* name, int size) {
             blocksRequired--;
         }
     }
+
     if (blocksRequired > 0) {
         cout << "Error: Not enough disk space.\n";
         return -1;
@@ -139,23 +143,28 @@ int createFile(const char* name, int size) {
     strcpy(directory[dirIndex].name, name);
     directory[dirIndex].startBlock = startBlock;
     directory[dirIndex].size = size;
-    directory[dirIndex].isDirectory = 0;
+    directory[dirIndex].isDirectory = 0; // Mark as file
 
-    cout << "File '" << name << "' created successfully.\n";
+    cout << "File '" << name << "' created in entry " << dirIndex
+        << " with start block " << startBlock << endl;  // Detailed debug
+
     return 0;
 }
-
 void listFilesAndDirectories() {
     cout << "Files and Directories:\n";
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
-        if (directory[i].startBlock != -1 && directory[i].size != 0) {
-            cout << directory[i].name << " ("
-                << (directory[i].isDirectory ? "Directory" : "File")
-                << ", " << directory[i].size << " bytes)\n";
+        if (directory[i].startBlock != -1 && directory[i].name != "") {
+            if (directory[i].isDirectory) {
+                cout << " <DIR> " << directory[i].name << ", size : "<< directory[i].size << ", StartBlock: " << directory[i].startBlock;
+                cout << endl;
+            }
+            else if (directory[i].size != 0 && directory[i].isDirectory == 0) {
+                cout << " <FILE> " << directory[i].name << ", size : " << directory[i].size << ", StartBlock: " << directory[i].startBlock;
+                cout << endl;
+            }
         }
     }
 }
-
 int writeFile(const char* name, const char* data, int dataSize) {
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
         if (strcmp(directory[i].name, name) == 0) {
@@ -182,9 +191,6 @@ int writeFile(const char* name, const char* data, int dataSize) {
     cout << "Error: File not found.\n";
     return -1;
 }
-
-
-
 
 int readFile(const char* name) {
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
@@ -241,77 +247,102 @@ int truncateFile(const char* name, int newSize) {
     printf("Error: File not found.\n");
     return -1;
 }
+void encryptPartition(const char* diskName, const char* key) {
+    FILE* disk = fopen(diskName, "r+b");
+    if (!disk) {
+        perror("Error opening disk file");
+        return;
+    }
 
+    char buffer[BLOCK_SIZE];
+    for (int i = 0; i < FAT_SIZE; i++) {
+        fseek(disk, i * BLOCK_SIZE, SEEK_SET);
+        fread(buffer, 1, BLOCK_SIZE, disk);
+        for (int j = 0; j < BLOCK_SIZE; j++) {
+            buffer[j] ^= key[j % strlen(key)];
+        }
+        fseek(disk, i * BLOCK_SIZE, SEEK_SET);
+        fwrite(buffer, 1, BLOCK_SIZE, disk);
+    }
+    fclose(disk);
+    printf("Partition encrypted successfully.\n");
+}
 
-
-int deleteFile(const char* name) {
+void decryptPartition(const char* diskName, const char* key) {
+    encryptPartition(diskName, key);
+    printf("Partition decrypted successfully.\n");
+}
+void deleteFile(const char* name) {
     for (int i = 0; i < DIRECTORY_SIZE; i++) {
         if (strcmp(directory[i].name, name) == 0) {
-            // Free blocks in FAT
+       
             int block = directory[i].startBlock;
             while (block != -1) {
                 int nextBlock = FAT[block];
                 FAT[block] = -1;
                 block = nextBlock;
             }
-
-            // Remove directory entry
             directory[i].startBlock = -1;
-            printf("File '%s' deleted successfully.\n", name);
-            return 0;
+            cout << "File '" << name << "' deleted successfully.\n";
+            return;
         }
     }
-    printf("Error: File not found.\n");
-    return -1;
+    cout << "Error: File not found.\n";
 }
+
 void consoleInterface(const char* diskName) {
-    FILE* disk = fopen(diskName, "r+b"); 
+    FILE* disk = fopen(diskName, "r+b");
     if (!disk) {
         perror("Error opening disk file");
         exit(EXIT_FAILURE);
     }
-    while (1) {
-        printf("File System Menu:\n");
-        printf("1. Create File\n");
-        printf("2. Delete File\n");
-        printf("3. Write to File\n");
-        printf("4. Read File\n");
-        printf("5. Truncate File\n");
-        printf("6. List Files\n");
-        printf("7. Format Disk\n");
-        printf("8. Create Directory\n");
-        printf("9. Encrypt Partition\n");
-        printf("10. Decrypt Partition\n");
-        printf("11. Exit\n");
-        printf("Enter your choice: ");
+    loadFileSystemState(disk);
+
+
+    while (true) {
+        cout << "\nFile System Menu:\n";
+        cout << "1. Create File\n";
+        cout << "2. Delete File\n";
+        cout << "3. Write to File\n";
+        cout << "4. Read File\n";
+        cout << "5. Truncate File\n";
+        cout << "6. List Files\n";
+        cout << "7. Format Disk\n";
+        cout << "8. Create Directory\n";
+        cout << "9. Delete Directory\n";
+        cout << "10. List Files & Directories\n";
+        cout << "11. Encrypt Partition\n";
+        cout << "12. Decrypt Partition\n";
+        cout << "13. Exit\n";
+        cout << "Enter your choice: ";
 
         int choice;
-        scanf("%d", &choice);
+        cin >> choice;
 
         switch (choice) {
         case 1: {
             char name[MAX_FILE_NAME];
             int size;
-            printf("Enter file name: ");
+            cout << "Enter file name: ";
             cin >> name;
-            printf("Enter file size (bytes): ");
+            cout << "Enter file size (bytes): ";
             cin >> size;
             createFile(name, size);
             break;
         }
         case 2: {
             char name[MAX_FILE_NAME];
-            printf("Enter file name to delete: ");
+            cout << "Enter file name to delete: ";
             cin >> name;
             deleteFile(name);
             break;
         }
         case 3: {
             char name[MAX_FILE_NAME];
-            printf("Enter file name to write to: ");
+            cout << "Enter file name to write to: ";
             cin >> name;
             char data[MAX_FILE_SIZE];
-            printf("Enter data to write: ");
+            cout << "Enter data to write: ";
             cin.ignore();
             cin.getline(data, MAX_FILE_SIZE);
             writeFile(name, data, strlen(data));
@@ -319,7 +350,7 @@ void consoleInterface(const char* diskName) {
         }
         case 4: {
             char name[MAX_FILE_NAME];
-            printf("Enter file name to read: ");
+            cout << "Enter file name to read: ";
             cin >> name;
             readFile(name);
             break;
@@ -327,24 +358,56 @@ void consoleInterface(const char* diskName) {
         case 5: {
             char name[MAX_FILE_NAME];
             int newSize;
-            printf("Enter file name to truncate: ");
+            cout << "Enter file name to truncate: ";
             cin >> name;
-            printf("Enter new size (bytes): ");
+            cout << "Enter new size (bytes): ";
             cin >> newSize;
             truncateFile(name, newSize);
             break;
         }
         case 6:
+        case 10: // Combine both cases for list
             listFilesAndDirectories();
             break;
         case 7:
             formatDisk(diskName);
             break;
-        case 11:
-            exitProgram(disk);
+        case 8: {
+            char name[MAX_FILE_NAME];
+            cout << "Enter directory name: ";
+            cin >> name;
+            createDirectory(name);
+            break;
+        }
+        case 9: {
+            char name[MAX_FILE_NAME];
+            cout << "Enter directory name: ";
+            cin >> name;
+            deleteDirectory(name);
+            break;
+        }
+        case 11: {
+            char key[BLOCK_SIZE];
+            cout << "Enter encryption key: ";
+            cin >> key;
+            encryptPartition(diskName, key);
+            break;
+        }
+        case 12: {
+            char key[BLOCK_SIZE];
+            cout << "Enter decryption key: ";
+            cin >> key;
+            decryptPartition(diskName, key);
+            break;
+        }
+        case 13:
+            saveFileSystemState(disk);
+            fclose(disk);
+            cout << "Exiting the file system. Goodbye!\n";
             return;
         default:
-            printf("Invalid choice.\n");
+            cout << "Invalid choice. Please try again.\n";
+            break;
         }
     }
 }
@@ -371,7 +434,5 @@ void loadFileSystemState(const char* diskName) {
     fclose(disk);
     printf("File system state loaded successfully.\n");
 }
-
-
 
 
