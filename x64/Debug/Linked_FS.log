@@ -1,0 +1,3 @@
+﻿  fileSystem.cpp
+C:\Users\Morokom\source\repos\Linked_FS\Linked_FS\fileSystem.cpp(317,41): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+  Linked_FS.vcxproj -> C:\Users\Morokom\source\repos\Linked_FS\x64\Debug\Linked_FS.exe
